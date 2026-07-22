@@ -88,9 +88,9 @@ def load_runtime_config(args: argparse.Namespace, environ: dict[str, str] | None
     documents_directory = _resolve_documents_directory(args.documents_dir or environment.get("DOCUMENTS_DIR", "documents"))
     if not documents_directory.is_dir():
         raise ValidationConfigurationError("documents-dir debe existir y ser un directorio")
-    top_k = _positive_int(args.top_k if args.top_k is not None else environment.get("RETRIEVER_TOP_K", "4"), "top-k")
+    top_k = _positive_int(args.top_k if args.top_k is not None else environment.get("RETRIEVER_TOP_K", "8"), "top-k")
     score_threshold = _threshold(
-        args.score_threshold if args.score_threshold is not None else environment.get("RETRIEVER_SCORE_THRESHOLD", "0.3")
+        args.score_threshold if args.score_threshold is not None else environment.get("RETRIEVER_SCORE_THRESHOLD", "0.55")
     )
     chunk_size = _positive_int(args.chunk_size if args.chunk_size is not None else environment.get("CHUNK_SIZE", "300"), "chunk-size")
     chunk_overlap = _non_negative_int(
