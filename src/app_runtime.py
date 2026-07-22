@@ -73,8 +73,8 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> AppConfig:
         raise AppConfigurationError("El directorio del índice configurado no es válido")
     if _paths_overlap(documents_dir, vector_store_dir):
         raise AppConfigurationError("El corpus y el directorio del índice no pueden superponerse")
-    top_k = _positive_int(environment.get("RETRIEVER_TOP_K", "4"), "RETRIEVER_TOP_K")
-    score_threshold = _score_threshold(environment.get("RETRIEVER_SCORE_THRESHOLD", "0.3"))
+    top_k = _positive_int(environment.get("RETRIEVER_TOP_K", "8"), "RETRIEVER_TOP_K")
+    score_threshold = _score_threshold(environment.get("RETRIEVER_SCORE_THRESHOLD", "0.55"))
     chunk_size = _positive_int(environment.get("CHUNK_SIZE", "300"), "CHUNK_SIZE")
     chunk_overlap = _non_negative_int(environment.get("CHUNK_OVERLAP", "30"), "CHUNK_OVERLAP")
     if chunk_overlap >= chunk_size:

@@ -74,9 +74,30 @@ def test_load_config_uses_dotenv_without_override_and_normalizes_models(tmp_path
 
     assert calls == [{"override": False}]
     assert (config.chat_model, config.embedding_model) == ("chat-test", "embedding-test")
+    assert (config.top_k, config.score_threshold) == (2, 0.4)
     assert "secreto-falso" not in repr(config)
     with pytest.raises(FrozenInstanceError):
         config.top_k = 1  # type: ignore[misc]
+
+
+def test_load_config_uses_retrieval_defaults_when_variables_are_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    documents, store = tmp_path / "documents", tmp_path / "store"
+    documents.mkdir()
+    environment = _environment(documents, store)
+    environment.pop("RETRIEVER_TOP_K")
+    environment.pop("RETRIEVER_SCORE_THRESHOLD")
+    monkeypatch.setattr(runtime, "load_dotenv", lambda **kwargs: False)
+
+    config = runtime.load_app_config(environment)
+
+    assert (config.top_k, config.score_threshold) == (8, 0.55)
+
+
+def test_env_example_uses_the_retrieval_defaults() -> None:
+    lines = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8").splitlines()
+
+    assert lines.count("RETRIEVER_TOP_K=8") == 1
+    assert lines.count("RETRIEVER_SCORE_THRESHOLD=0.55") == 1
 
 
 @pytest.mark.parametrize("name, value", [("GOOGLE_API_KEY", None), ("GEMINI_CHAT_MODEL", ""), ("GEMINI_EMBEDDING_MODEL", "   ")])

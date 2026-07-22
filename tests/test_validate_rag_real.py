@@ -101,6 +101,32 @@ def test_load_runtime_config_uses_fake_non_secret_environment(tmp_path: Path, mo
     assert "clave-falsa" not in repr(config)
 
 
+def test_load_runtime_config_uses_retrieval_defaults_without_cli_or_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    environment = _environment()
+    environment["DOCUMENTS_DIR"] = str(tmp_path)
+    environment.pop("RETRIEVER_TOP_K")
+    environment.pop("RETRIEVER_SCORE_THRESHOLD")
+    monkeypatch.setattr(script, "load_dotenv", lambda: False)
+    monkeypatch.setattr(script, "create_embeddings", lambda model: pytest.fail("No debe inicializar embeddings"))
+    monkeypatch.setattr(script, "create_chat_model", lambda model: pytest.fail("No debe inicializar chat"))
+
+    config = script.load_runtime_config(script.build_parser().parse_args([]), environment)
+
+    assert (config.top_k, config.score_threshold) == (8, 0.55)
+
+
+def test_load_runtime_config_gives_cli_precedence_over_retrieval_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    environment = _environment()
+    environment["DOCUMENTS_DIR"] = str(tmp_path)
+    monkeypatch.setattr(script, "load_dotenv", lambda: False)
+
+    config = script.load_runtime_config(
+        script.build_parser().parse_args(["--top-k", "3", "--score-threshold", "0.6"]), environment
+    )
+
+    assert (config.top_k, config.score_threshold) == (3, 0.6)
+
+
 @pytest.mark.parametrize("name, value", [("GOOGLE_API_KEY", None), ("GEMINI_CHAT_MODEL", "   "), ("GEMINI_EMBEDDING_MODEL", "")])
 def test_missing_or_blank_required_values_report_only_their_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, value: str | None) -> None:
     environment = _environment()
