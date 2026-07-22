@@ -4,6 +4,7 @@ langchain-google-genai
 langgraph
 langchain-text-splitters
 faiss-cpu
+numpy
 python-dotenv
 pydantic
 PyMuPDF
