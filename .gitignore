@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Proyecto RAG: entorno local, secretos y artefactos generados
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/vector_store/
+*.faiss
+*.pkl
+.DS_Store
+Thumbs.db

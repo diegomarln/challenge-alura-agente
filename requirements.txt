@@ -1,0 +1,13 @@
+streamlit
+langchain
+langchain-google-genai
+langgraph
+langchain-text-splitters
+faiss-cpu
+python-dotenv
+pydantic
+PyMuPDF
+python-docx
+openpyxl
+python-pptx
+beautifulsoup4
