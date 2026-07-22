@@ -24,6 +24,7 @@ from src.rag import (
     build_rag_messages,
     create_chat_model,
 )
+from src.rag.prompts import INSUFFICIENT_CONTEXT_MARKER
 
 
 class FakeVectorStore:
@@ -165,6 +166,33 @@ def test_fallback_skips_context_prompt_and_model(monkeypatch: pytest.MonkeyPatch
     assert vector_store.calls == [("consulta sin evidencia", 4, 0.3)]
     assert model.calls == []
     assert response == RagResponse("consulta sin evidencia", FALLBACK_MESSAGE, (), 0, True)
+
+
+@pytest.mark.parametrize("model_answer", [INSUFFICIENT_CONTEXT_MARKER, f"  {INSUFFICIENT_CONTEXT_MARKER}  "])
+def test_exact_insufficient_context_marker_returns_public_fallback_without_sources(model_answer: str) -> None:
+    vector_store = FakeVectorStore(_results())
+    model = FakeChatModel(SimpleNamespace(content=model_answer))
+
+    response = RagService(vector_store, model).answer("  consulta  ")
+
+    assert vector_store.calls == [("consulta", 4, 0.3)]
+    assert len(model.calls) == 1
+    assert response == RagResponse("consulta", FALLBACK_MESSAGE, (), 0, True)
+    assert INSUFFICIENT_CONTEXT_MARKER not in response.answer
+
+
+def test_marker_with_additional_text_remains_a_grounded_answer() -> None:
+    answer = f"Respuesta: {INSUFFICIENT_CONTEXT_MARKER}"
+    vector_store = FakeVectorStore(_results())
+    model = FakeChatModel(SimpleNamespace(content=answer))
+
+    response = RagService(vector_store, model).answer("consulta")
+
+    assert len(model.calls) == 1
+    assert response.answer == answer
+    assert response.sources
+    assert response.documents_found == 2
+    assert response.used_fallback is False
 
 
 @pytest.mark.parametrize("invalid_results", [None, (), (item for item in _results()), "texto", {"resultado": 1}])

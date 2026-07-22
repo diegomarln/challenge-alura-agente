@@ -8,7 +8,7 @@ from typing import Any
 
 from .context import SourceReference, build_context
 from .generation import RagConfigurationError, RagError, RagGenerationError, _extract_response_text
-from .prompts import build_rag_messages
+from .prompts import INSUFFICIENT_CONTEXT_MARKER, build_rag_messages
 from .vector_store import VectorStoreError
 
 FALLBACK_MESSAGE = "No encontré información suficiente en los documentos internos para responder esta consulta."
@@ -99,6 +99,14 @@ class RagService:
         except Exception as error:
             raise RagGenerationError("No fue posible generar una respuesta para la consulta") from error
         answer = _extract_response_text(model_response)
+        if answer.strip() == INSUFFICIENT_CONTEXT_MARKER:
+            return RagResponse(
+                question=normalized_question,
+                answer=self.fallback_message,
+                sources=(),
+                documents_found=0,
+                used_fallback=True,
+            )
         return RagResponse(
             question=normalized_question,
             answer=answer,
