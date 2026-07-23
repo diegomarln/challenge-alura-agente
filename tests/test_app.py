@@ -14,6 +14,7 @@ import pytest
 import app
 from src.app_runtime import AppConfigurationError, AppInitializationError
 from src.rag.context import SourceReference
+from src.rag.service import FALLBACK_MESSAGE
 
 
 class StopCalled(BaseException):
@@ -52,6 +53,10 @@ class _FakeStreamlit:
         self._record("expander", *args, **kwargs)
         return nullcontext()
 
+    def container(self, *args: Any, **kwargs: Any) -> Any:
+        self._record("container", *args, **kwargs)
+        return nullcontext()
+
     def button(self, label: str, **kwargs: Any) -> bool:
         self._record("button", label, **kwargs)
         return self.button_values.get(label, False)
@@ -66,7 +71,14 @@ class _FakeStreamlit:
 
     def pills(self, *args: Any, **kwargs: Any) -> object | None:
         self._record("pills", *args, **kwargs)
-        return self.pills_value
+        if self.pills_value is not None:
+            key = kwargs.get("key")
+            if isinstance(key, str):
+                self.session_state[key] = self.pills_value
+            callback = kwargs.get("on_change")
+            if callable(callback):
+                callback()
+        return self.session_state.get(kwargs.get("key"))
 
     def rerun(self) -> None:
         self._record("rerun")
@@ -230,6 +242,8 @@ def test_process_question_does_not_store_raw_response_or_context(fake_st: _FakeS
     assert set(message) == {"role", "content", "sources", "used_fallback"}
     assert message["sources"] == (source,)
     assert raw not in message.values()
+    badges = [args[0] for name, args, _ in fake_st.calls if name == "badge"]
+    assert badges == ["Basada en documentos internos · 1 fuentes"]
     assert any(name == "expander" for name, _, _ in fake_st.calls)
 
 
@@ -259,20 +273,19 @@ def test_render_history_never_answers_again(fake_st: _FakeStreamlit) -> None:
     assert [args[0] for name, args, _ in fake_st.calls if name == "chat_message"] == ["user", "assistant"]
 
 
-def test_header_returns_selected_suggestion_and_uses_expected_questions(fake_st: _FakeStreamlit) -> None:
+def test_header_converts_a_short_suggestion_label_to_its_full_question(fake_st: _FakeStreamlit) -> None:
     app.initialize_session_state()
-    selected = app.SUGGESTED_QUESTIONS[1]
-    fake_st.pills_value = selected
+    selected_label = "Días de teletrabajo"
+    fake_st.pills_value = selected_label
 
-    assert app.render_header() == selected
+    assert app.render_header() == app.SUGGESTED_QUESTIONS[selected_label]
+    assert "suggested_question" not in fake_st.session_state
     pills_calls = [entry for entry in fake_st.calls if entry[0] == "pills"]
-    assert pills_calls == [
-        (
-            "pills",
-            ("Preguntas sugeridas", app.SUGGESTED_QUESTIONS),
-            {"key": "suggested_question", "width": "stretch"},
-        )
-    ]
+    assert pills_calls[0][1] == ("Preguntas sugeridas", tuple(app.SUGGESTED_QUESTIONS))
+    assert pills_calls[0][2]["key"] == "suggested_question"
+    assert pills_calls[0][2]["width"] == "stretch"
+    assert pills_calls[0][2]["on_change"] is app._queue_suggested_question
+    assert any(name == "container" and kwargs == {"border": True} for name, _, kwargs in fake_st.calls)
 
 
 def test_header_hides_suggestions_when_history_exists(fake_st: _FakeStreamlit) -> None:
@@ -283,16 +296,16 @@ def test_header_hides_suggestions_when_history_exists(fake_st: _FakeStreamlit) -
 
 
 @pytest.mark.parametrize(
-    ("suggested_question", "typed_question"),
+    ("suggested_label", "typed_question"),
     [
-        (app.SUGGESTED_QUESTIONS[0], None),
-        (None, app.SUGGESTED_QUESTIONS[0]),
+        ("Reembolso de internet", None),
+        (None, app.SUGGESTED_QUESTIONS["Reembolso de internet"]),
     ],
 )
 def test_main_dispatches_suggested_and_typed_questions_through_the_same_flow(
     fake_st: _FakeStreamlit,
     monkeypatch: pytest.MonkeyPatch,
-    suggested_question: str | None,
+    suggested_label: str | None,
     typed_question: str | None,
 ) -> None:
     calls: list[str] = []
@@ -301,18 +314,23 @@ def test_main_dispatches_suggested_and_typed_questions_through_the_same_flow(
     monkeypatch.setattr(app, "load_resources", lambda: resources)
     monkeypatch.setattr(app, "render_sidebar", lambda value: None)
     monkeypatch.setattr(app, "render_chat_history", lambda: None)
-    fake_st.pills_value = suggested_question
+    fake_st.pills_value = suggested_label
     fake_st.chat_input_value = typed_question
 
     app.main()
 
-    expected_question = app.SUGGESTED_QUESTIONS[0]
+    expected_question = app.SUGGESTED_QUESTIONS["Reembolso de internet"]
     assert calls == [expected_question]
     assert fake_st.session_state["messages"] == [
         {"role": "user", "content": expected_question},
         {"role": "assistant", "content": "Respuesta final", "sources": (), "used_fallback": True},
     ]
     assert any(name == "chat_input" for name, _, _ in fake_st.calls)
+    assert "suggested_question" not in fake_st.session_state
+    assert "pending_suggested_question" not in fake_st.session_state
+    fake_st.calls.clear()
+    assert app.render_header() is None
+    assert not any(name == "pills" for name, _, _ in fake_st.calls)
 
 
 @pytest.mark.parametrize(
@@ -349,11 +367,15 @@ def test_render_sources_hides_controls_and_rounds_safe_score(fake_st: _FakeStrea
 
 
 def test_fallback_does_not_render_sources(fake_st: _FakeStreamlit) -> None:
-    response = SimpleNamespace(answer="Fallback", sources=(_source(),), used_fallback=True)
+    response = SimpleNamespace(answer=FALLBACK_MESSAGE, sources=(_source(),), used_fallback=True)
     resources = _resources(answer=lambda question: response)
     app.initialize_session_state()
     app.process_question("pregunta", resources)
     assert not any(name == "expander" for name, _, _ in fake_st.calls)
+    rendered_answers = [args[0] for name, args, _ in fake_st.calls if name == "markdown"]
+    captions = [args[0] for name, args, _ in fake_st.calls if name == "caption"]
+    assert FALLBACK_MESSAGE in rendered_answers
+    assert app.FALLBACK_GUIDANCE in captions
 
 
 def test_sidebar_clear_only_empties_messages_without_reinitializing(fake_st: _FakeStreamlit) -> None:
@@ -373,6 +395,8 @@ def test_sidebar_requires_rebuild_confirmation(fake_st: _FakeStreamlit, monkeypa
     app.render_sidebar(_resources())
     rebuild_calls = [entry for entry in fake_st.calls if entry[0] == "button" and entry[1][0] == "Reconstruir índice"]
     assert rebuild_calls[0][2]["disabled"] is True
+    administration = [entry for entry in fake_st.calls if entry[0] == "expander" and entry[1][0] == "Administración"]
+    assert administration[0][2]["expanded"] is False
     assert called == []
 
 
