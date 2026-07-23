@@ -21,6 +21,14 @@ from src.rag.generation import RagError
 from src.rag.vector_store import VectorStoreError
 
 
+SUGGESTED_QUESTIONS = {
+    "Reembolso de internet": "¿Cuál es el monto máximo mensual que se puede reembolsar por internet?",
+    "Días de teletrabajo": "¿Cuántos días de teletrabajo se permiten por semana?",
+    "Correo sospechoso": "¿Qué debo hacer si recibo un correo sospechoso?",
+}
+FALLBACK_GUIDANCE = "Prueba con una consulta relacionada con reembolsos, teletrabajo o seguridad."
+
+
 def configure_page() -> None:
     """Configura la página antes de renderizar cualquier otro elemento."""
     st.set_page_config(
@@ -76,16 +84,35 @@ def load_resources(force_reindex: bool = False) -> AppResources | None:
     return resources
 
 
-def render_header() -> None:
-    """Muestra la orientación segura y estática de la aplicación."""
-    st.title("Asistente de Políticas Corporativas")
-    st.caption("Consulta información de reembolsos, teletrabajo y seguridad utilizando los documentos internos disponibles.")
-    st.info("Las respuestas se generan únicamente a partir de los documentos corporativos indexados.")
-    if not st.session_state["messages"]:
-        st.caption("Ejemplos de consulta:")
-        st.caption("• ¿Cuál es el monto máximo de reembolso por internet?")
-        st.caption("• ¿Cuántos días de teletrabajo se permiten?")
-        st.caption("• ¿Qué debo hacer si recibo un correo sospechoso?")
+def render_header() -> str | None:
+    """Muestra la orientación inicial y devuelve una sugerencia seleccionada."""
+    st.header("Asistente de Políticas Corporativas", divider=False)
+    st.caption("Consulta políticas de reembolsos, teletrabajo y seguridad.")
+    st.caption(":material/verified: Las respuestas se basan en documentos internos.")
+    pending_question = st.session_state.get("pending_suggested_question")
+    if st.session_state["messages"] or pending_question is not None:
+        return pending_question if isinstance(pending_question, str) else None
+    with st.container(border=True):
+        st.write("Bienvenido. Elige una pregunta sugerida o escribe la tuya.")
+        st.caption("Puedes consultar condiciones y procedimientos de las políticas internas.")
+        st.pills(
+            "Preguntas sugeridas",
+            tuple(SUGGESTED_QUESTIONS),
+            key="suggested_question",
+            on_change=_queue_suggested_question,
+            width="stretch",
+        )
+    pending_question = st.session_state.get("pending_suggested_question")
+    return pending_question if isinstance(pending_question, str) else None
+
+
+def _queue_suggested_question() -> None:
+    """Convierte una etiqueta breve en su consulta y elimina la selección visible."""
+    selected_label = st.session_state.get("suggested_question")
+    question = SUGGESTED_QUESTIONS.get(selected_label) if isinstance(selected_label, str) else None
+    if question is not None:
+        st.session_state["pending_suggested_question"] = question
+    st.session_state.pop("suggested_question", None)
 
 
 def render_sidebar(resources: AppResources) -> None:
@@ -93,22 +120,23 @@ def render_sidebar(resources: AppResources) -> None:
     with st.sidebar:
         if st.session_state.pop("reindex_success", False) is True:
             st.success("El índice se reconstruyó correctamente.")
-        st.subheader("Estado del conocimiento")
+        st.subheader("Conocimiento disponible")
         st.metric("Unidades documentales", _safe_metric_value(resources.documents_loaded))
         st.metric("Fragmentos indexados", _safe_metric_value(resources.chunks_created))
         st.metric("Dimensión vectorial", _safe_metric_value(resources.vector_dimension))
         st.caption(_index_status(resources.index_rebuilt))
 
+        st.subheader("Conversación")
         if st.button("Limpiar conversación", key="clear_conversation"):
             st.session_state["messages"] = []
             st.rerun()
 
         st.divider()
-        st.subheader("Administración del índice")
-        st.caption("Reconstruye el índice cuando cambien los documentos o la configuración de fragmentación.")
-        confirmed = st.checkbox("Confirmo la reconstrucción del índice", key="confirm_reindex")
-        if st.button("Reconstruir índice", disabled=not confirmed, key="rebuild_index"):
-            rebuild_index()
+        with st.expander("Administración", expanded=False):
+            st.caption("Reconstruye el índice cuando cambien los documentos o la configuración de fragmentación.")
+            confirmed = st.checkbox("Confirmo la reconstrucción del índice", key="confirm_reindex")
+            if st.button("Reconstruir índice", disabled=not confirmed, key="rebuild_index"):
+                rebuild_index()
 
 
 def rebuild_index() -> None:
@@ -141,10 +169,8 @@ def render_chat_history() -> None:
             continue
         with st.chat_message(role):
             st.markdown(content)
-            if role == "assistant" and message.get("used_fallback") is False:
-                sources = message.get("sources")
-                if isinstance(sources, tuple) and sources:
-                    render_sources(sources)
+            if role == "assistant":
+                _render_response_details(message.get("sources"), message.get("used_fallback"))
 
 
 def process_question(question: object, resources: AppResources) -> None:
@@ -160,15 +186,14 @@ def process_question(question: object, resources: AppResources) -> None:
         st.markdown(normalized_question)
     try:
         with st.chat_message("assistant"):
-            with st.spinner("Consultando los documentos internos..."):
+            with st.spinner("Consultando documentos internos..."):
                 response = resources.rag_service.answer(normalized_question)
             answer, sources, used_fallback = _safe_response(response)
             if answer is None:
                 st.error("No fue posible procesar la respuesta del asistente.")
                 return
             st.markdown(answer)
-            if sources and not used_fallback:
-                render_sources(sources)
+            _render_response_details(sources, used_fallback)
     except (KeyboardInterrupt, SystemExit, MemoryError):
         raise
     except (RagError, VectorStoreError):
@@ -189,9 +214,24 @@ def process_question(question: object, resources: AppResources) -> None:
 
 def render_sources(sources: Iterable[SourceReference]) -> None:
     """Muestra referencias normalizadas sin exponer rutas ni contenido documental."""
-    with st.expander("Fuentes consultadas"):
+    with st.expander("Fuentes consultadas", expanded=False):
         for source in sources:
             st.caption(_format_source_reference(source))
+
+
+def _render_response_details(sources: object, used_fallback: object) -> None:
+    """Muestra evidencia o guía de fallback sin alterar el contenido de la respuesta."""
+    if used_fallback is True:
+        st.caption(FALLBACK_GUIDANCE)
+        return
+    if not isinstance(sources, tuple) or not sources:
+        return
+    st.badge(
+        f"Basada en documentos internos · {len(sources)} fuentes",
+        icon=":material/verified:",
+        color="blue",
+    )
+    render_sources(sources)
 
 
 def _safe_response(response: object) -> tuple[str | None, tuple[SourceReference, ...], bool]:
@@ -294,12 +334,15 @@ def main() -> None:
     resources = load_resources()
     if resources is None:
         return
-    render_header()
+    suggested_question = render_header()
     render_sidebar(resources)
     render_chat_history()
-    question = st.chat_input("Escribe una pregunta sobre las políticas internas")
+    typed_question = st.chat_input("Escribe una pregunta sobre las políticas internas")
+    question = suggested_question if suggested_question is not None else typed_question
     if question is not None:
         process_question(question, resources)
+        if suggested_question is not None:
+            st.session_state.pop("pending_suggested_question", None)
 
 
 if __name__ == "__main__":
