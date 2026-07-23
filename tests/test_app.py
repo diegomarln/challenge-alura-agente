@@ -31,6 +31,7 @@ class _FakeStreamlit:
         self.button_values: dict[str, bool] = {}
         self.checkbox_values: dict[str, bool] = {}
         self.chat_input_value: object | None = None
+        self.pills_value: object | None = None
         self.sidebar = nullcontext()
 
     def _record(self, name: str, *args: Any, **kwargs: Any) -> None:
@@ -62,6 +63,10 @@ class _FakeStreamlit:
     def chat_input(self, *args: Any, **kwargs: Any) -> object | None:
         self._record("chat_input", *args, **kwargs)
         return self.chat_input_value
+
+    def pills(self, *args: Any, **kwargs: Any) -> object | None:
+        self._record("pills", *args, **kwargs)
+        return self.pills_value
 
     def rerun(self) -> None:
         self._record("rerun")
@@ -252,6 +257,62 @@ def test_render_history_never_answers_again(fake_st: _FakeStreamlit) -> None:
     ]
     app.render_chat_history()
     assert [args[0] for name, args, _ in fake_st.calls if name == "chat_message"] == ["user", "assistant"]
+
+
+def test_header_returns_selected_suggestion_and_uses_expected_questions(fake_st: _FakeStreamlit) -> None:
+    app.initialize_session_state()
+    selected = app.SUGGESTED_QUESTIONS[1]
+    fake_st.pills_value = selected
+
+    assert app.render_header() == selected
+    pills_calls = [entry for entry in fake_st.calls if entry[0] == "pills"]
+    assert pills_calls == [
+        (
+            "pills",
+            ("Preguntas sugeridas", app.SUGGESTED_QUESTIONS),
+            {"key": "suggested_question", "width": "stretch"},
+        )
+    ]
+
+
+def test_header_hides_suggestions_when_history_exists(fake_st: _FakeStreamlit) -> None:
+    fake_st.session_state["messages"] = [{"role": "user", "content": "consulta previa"}]
+
+    assert app.render_header() is None
+    assert not any(name == "pills" for name, _, _ in fake_st.calls)
+
+
+@pytest.mark.parametrize(
+    ("suggested_question", "typed_question"),
+    [
+        (app.SUGGESTED_QUESTIONS[0], None),
+        (None, app.SUGGESTED_QUESTIONS[0]),
+    ],
+)
+def test_main_dispatches_suggested_and_typed_questions_through_the_same_flow(
+    fake_st: _FakeStreamlit,
+    monkeypatch: pytest.MonkeyPatch,
+    suggested_question: str | None,
+    typed_question: str | None,
+) -> None:
+    calls: list[str] = []
+    response = SimpleNamespace(answer="Respuesta final", sources=(), used_fallback=True)
+    resources = _resources(answer=lambda question: calls.append(question) or response)
+    monkeypatch.setattr(app, "load_resources", lambda: resources)
+    monkeypatch.setattr(app, "render_sidebar", lambda value: None)
+    monkeypatch.setattr(app, "render_chat_history", lambda: None)
+    fake_st.pills_value = suggested_question
+    fake_st.chat_input_value = typed_question
+
+    app.main()
+
+    expected_question = app.SUGGESTED_QUESTIONS[0]
+    assert calls == [expected_question]
+    assert fake_st.session_state["messages"] == [
+        {"role": "user", "content": expected_question},
+        {"role": "assistant", "content": "Respuesta final", "sources": (), "used_fallback": True},
+    ]
+    assert any(name == "chat_input" for name, _, _ in fake_st.calls)
 
 
 @pytest.mark.parametrize(

@@ -21,6 +21,13 @@ from src.rag.generation import RagError
 from src.rag.vector_store import VectorStoreError
 
 
+SUGGESTED_QUESTIONS = (
+    "¿Cuál es el monto máximo mensual que se puede reembolsar por internet?",
+    "¿Cuántos días de teletrabajo se permiten por semana?",
+    "¿Qué debo hacer si recibo un correo sospechoso?",
+)
+
+
 def configure_page() -> None:
     """Configura la página antes de renderizar cualquier otro elemento."""
     st.set_page_config(
@@ -76,16 +83,20 @@ def load_resources(force_reindex: bool = False) -> AppResources | None:
     return resources
 
 
-def render_header() -> None:
-    """Muestra la orientación segura y estática de la aplicación."""
-    st.title("Asistente de Políticas Corporativas")
-    st.caption("Consulta información de reembolsos, teletrabajo y seguridad utilizando los documentos internos disponibles.")
-    st.info("Las respuestas se generan únicamente a partir de los documentos corporativos indexados.")
+def render_header() -> str | None:
+    """Muestra la orientación inicial y devuelve una sugerencia seleccionada."""
+    st.header("Asistente de Políticas Corporativas", divider=False)
+    st.caption("Consulta políticas de reembolsos, teletrabajo y seguridad.")
+    st.caption(":material/verified: Las respuestas se basan en documentos internos.")
     if not st.session_state["messages"]:
-        st.caption("Ejemplos de consulta:")
-        st.caption("• ¿Cuál es el monto máximo de reembolso por internet?")
-        st.caption("• ¿Cuántos días de teletrabajo se permiten?")
-        st.caption("• ¿Qué debo hacer si recibo un correo sospechoso?")
+        st.write("Bienvenido. Elige una pregunta sugerida o escribe la tuya.")
+        return st.pills(
+            "Preguntas sugeridas",
+            SUGGESTED_QUESTIONS,
+            key="suggested_question",
+            width="stretch",
+        )
+    return None
 
 
 def render_sidebar(resources: AppResources) -> None:
@@ -294,10 +305,11 @@ def main() -> None:
     resources = load_resources()
     if resources is None:
         return
-    render_header()
+    suggested_question = render_header()
     render_sidebar(resources)
     render_chat_history()
-    question = st.chat_input("Escribe una pregunta sobre las políticas internas")
+    typed_question = st.chat_input("Escribe una pregunta sobre las políticas internas")
+    question = suggested_question if suggested_question is not None else typed_question
     if question is not None:
         process_question(question, resources)
 
