@@ -197,12 +197,18 @@ Al no existir evidencia suficiente en los documentos internos, la aplicación de
 
 ## Pruebas y validaciones
 
-Se realizaron las siguientes comprobaciones:
+### Validación final — 26 de julio de 2026
 
-- 363 pruebas aprobadas.
-- Contenedor en estado `healthy`.
-- Endpoint de salud disponible en `/_stcore/health`.
-- Persistencia del índice verificada comparando hashes SHA-256 antes y después de reiniciar el servicio.
+- 367 pruebas aprobadas; 0 fallidas, 0 errores y 0 omitidas.
+- Validación real satisfactoria con Gemini:
+  - Reembolso de internet: 35 EUR.
+  - Teletrabajo: 2 días remotos.
+  - Correo sospechoso: precaución con adjuntos y reporte al Service Desk.
+  - Consulta fuera del corpus: fallback sin fuentes.
+- Construcción Docker correcta.
+- Contenedor ejecutándose como `appuser` con UID/GID `10001`.
+- Healthcheck en estado `healthy` y respuesta HTTP 200 con cuerpo `ok`.
+- Volumen persistente montado en `/app/data/vector_store`.
 
 Para ejecutar la suite local:
 
@@ -210,6 +216,12 @@ Para ejecutar la suite local:
 python -m pytest -v
 python -m compileall app.py src scripts tests
 python -m pip check
+```
+
+Para ejecutar la validación real:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.validate_rag_real
 ```
 
 ## Licencia
